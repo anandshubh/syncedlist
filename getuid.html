@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Get your Firebase UID</title>
+</head>
+<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:640px">
+<h3>Sign in to capture your uid</h3>
+<button id="go" style="font-size:1.1rem;padding:.6rem 1.1rem;cursor:pointer">Sign in with Google</button>
+<pre id="out" style="margin-top:1.2rem;font-size:1rem;white-space:pre-wrap"></pre>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup }
+  from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+// ── PASTE your NEW project's web config here (Project settings → Your apps → Web app) ──
+const firebaseConfig = {
+  apiKey: "…",
+  authDomain: "….firebaseapp.com",
+  projectId: "…",
+  storageBucket: "….firebasestorage.app",  // copy EXACTLY from console
+  messagingSenderId: "…",
+  appId: "…",
+};
+// ───────────────────────────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyAlAdMeckrGdS4FdqhvJe8qaYQwzE0r3ic",
+  authDomain: "synclist-2adba.firebaseapp.com",
+  projectId: "synclist-2adba",
+  storageBucket: "synclist-2adba.firebasestorage.app",
+  messagingSenderId: "90427614652",
+  appId: "1:90427614652:web:3a5143d2f2fc2ec70637b9"
+};
+
+
+const auth = getAuth(initializeApp(firebaseConfig));
+const out = document.getElementById("out");
+
+document.getElementById("go").onclick = async () => {
+  out.textContent = "Opening Google…";
+  try {
+    const { user } = await signInWithPopup(auth, new GoogleAuthProvider());
+    out.textContent =
+      "uid:   " + user.uid + "\n" +
+      "email: " + user.email + "\n\n" +
+      "→ Copy the uid above. You'll use it as the members/{uid} doc id.";
+  } catch (e) {
+    out.textContent = "Error: " + (e && e.message ? e.message : e);
+  }
+};
+</script>
+</body>
+</html>
