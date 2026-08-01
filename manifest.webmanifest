@@ -1,6 +1,6 @@
 {
-  "name": "Sync List",
-  "short_name": "Sync List",
+  "name": "SyncedList",
+  "short_name": "SyncedList",
   "description": "Shared shopping list that routes each item to the right store.",
   "start_url": "./",
   "scope": "./",

@@ -1,4 +1,4 @@
-// Sync List parse proxy — Cloudflare Worker.
+// SyncedList parse proxy — Cloudflare Worker.
 // Holds ANTHROPIC_API_KEY server-side, and now REQUIRES a valid Firebase ID token
 // so it is no longer an open proxy. The app sends: Authorization: Bearer <idToken>.
 //
