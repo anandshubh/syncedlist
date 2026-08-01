@@ -1,24 +1,86 @@
 rules_version = '2';
 service cloud.firestore {
-  match /databases/{db}/documents {
+  match /databases/{database}/documents {
 
-    // The two household accounts. MUST MATCH the ALLOWED array in app.js.
-    function allowed() {
-      return request.auth != null
-        && request.auth.token.email.lower() in [
-          'you@gmail.com',
-          'wife@gmail.com'
-        ];
+    function signedIn() { return request.auth != null; }
+    function isAdmin()  { return signedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)); }
+
+    function memberDoc() {
+      return get(/databases/$(database)/documents/members/$(request.auth.uid)).data;
+    }
+    function isMember(hid) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/members/$(request.auth.uid))
+        && memberDoc().hid == hid;
+    }
+    function isHead(hid) { return isMember(hid) && memberDoc().role == 'head'; }
+
+    // ---- invite validation (used when a user redeems a code to join) ----
+    function invite(code) { return get(/databases/$(database)/documents/invites/$(code)).data; }
+    function validInvite(code, hid, role) {
+      return code is string
+        && exists(/databases/$(database)/documents/invites/$(code))
+        && invite(code).hid == hid
+        && invite(code).role == role
+        && invite(code).revoked != true
+        && (!('expiresAt' in invite(code)) || invite(code).expiresAt > request.time);
     }
 
-    // Shared household data: config, learned dictionary, active list.
-    match /shoppinglist_config/{doc}      { allow read, write: if allowed(); }
-    match /shoppinglist_dictionary/{doc}  { allow read, write: if allowed(); }
-    match /shoppinglist_list/{doc}        { allow read, write: if allowed(); }
-    match /shoppinglist_purchased/{doc}   { allow read, write: if allowed(); }
-    match /shoppinglist_staples/{doc}     { allow read, write: if allowed(); }
+    // ---- membership index (top-level; one household per person) ----
+    match /members/{uid} {
+      // you can read your own; a head can read the roster of their household
+      allow read: if signedIn() && ( request.auth.uid == uid
+                   || (isMember(resource.data.hid) && memberDoc().role == 'head') );
+      // admin seeds heads; a user joins THEMSELVES only by redeeming a valid invite
+      allow create: if isAdmin()
+                   || ( request.auth.uid == uid
+                        && request.resource.data.role in ['head','member']
+                        && request.resource.data.hid is string
+                        && validInvite(request.resource.data.viaInvite, request.resource.data.hid, request.resource.data.role) );
+      // a member can leave; a head can remove members of their household
+      allow delete: if isAdmin()
+                   || request.auth.uid == uid
+                   || (isMember(resource.data.hid) && memberDoc().role == 'head');
+      allow update: if isAdmin()
+                   || ( isMember(resource.data.hid) && memberDoc().role == 'head'
+                        && request.resource.data.hid == resource.data.hid
+                        && request.resource.data.email == resource.data.email
+                        && request.resource.data.role in ['head','member'] );
+    }
 
-    // Everything else denied.
-    match /{document=**}     { allow read, write: if false; }
+    // ---- admin flag: created manually in the console, read-only from clients ----
+    match /admins/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // ---- invite codes (head-managed, per household) ----
+    match /invites/{code} {
+      // a redeemer must be able to read the code doc by its (high-entropy) id
+      allow read:   if signedIn();
+      allow create: if (request.resource.data.role == 'member' && isHead(request.resource.data.hid))
+                     || (request.resource.data.role == 'head' && isAdmin());
+      allow delete: if isHead(resource.data.hid);
+      // head revokes; a redeemer consumes the code (single-use) by flipping revoked -> true
+      allow update: if signedIn()
+                     && request.resource.data.revoked == true
+                     && request.resource.data.hid == resource.data.hid
+                     && request.resource.data.role == resource.data.role;
+    }
+
+    // ---- all shopping data lives under the household ----
+    match /households/{hid} {
+      allow read:           if isMember(hid);
+      allow create, delete: if isAdmin();     // only admin mints/removes households
+      allow update:         if isHead(hid);   // rename
+
+      match /config/{doc}     { allow read: if isMember(hid); allow write: if isHead(hid) || isAdmin(); } // stores + categories: head (admin during setup)
+      match /list/{doc}       { allow read, write: if isMember(hid); }
+      match /dictionary/{doc} { allow read, write: if isMember(hid); }
+      match /staples/{doc}    { allow read, write: if isMember(hid); }
+      match /purchased/{doc}  { allow read, write: if isMember(hid); }
+    }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }
