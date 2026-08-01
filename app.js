@@ -53,7 +53,8 @@ async function routeUnknowns(names, stores, cats){
   const ctrl=new AbortController();
   const t=setTimeout(()=>ctrl.abort(), 20000);
   try{
-    const res = await fetch(WORKER_URL,{method:"POST",headers:{"Content-Type":"application/json"},
+    const token = auth.currentUser ? await auth.currentUser.getIdToken() : null;
+    const res = await fetch(WORKER_URL,{method:"POST",headers:{"Content-Type":"application/json",...(token?{"Authorization":"Bearer "+token}:{})},
       body:JSON.stringify({items:names,stores,categories:cats}),signal:ctrl.signal});
     if(!res.ok) throw new Error("worker "+res.status);
     const arr = await res.json();
