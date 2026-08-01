@@ -7,7 +7,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, doc, onSnapshot, setDoc, deleteDoc, writeBatch, getDoc, serverTimestamp
+  collection, doc, onSnapshot, setDoc, deleteDoc, writeBatch, getDoc, getDocs, serverTimestamp, query, where
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   getStorage, ref as sref, uploadBytes, getDownloadURL, deleteObject
@@ -87,6 +87,12 @@ function App(){
   const [hid,setHid]=useState(null);
   const [role,setRole]=useState(null);
   const [access,setAccess]=useState(undefined); // undefined = checking, "ok", "none"
+  const [houseName,setHouseName]=useState("");
+  const [members,setMembers]=useState([]);
+  const [invites,setInvites]=useState([]);
+  const [houseModal,setHouseModal]=useState(false);
+  const [codeInput,setCodeInput]=useState("");
+  const [joining,setJoining]=useState(false);
   const [stores,setStores]=useState([]);
   const [dict,setDict]=useState({});
   const [list,setList]=useState([]);
@@ -188,6 +194,49 @@ function App(){
   },[hid]);
 
   async function signIn(){try{await signInWithPopup(auth,new GoogleAuthProvider());}catch{flash("Sign-in failed");}}
+
+  // ---- households / invites (Stage 2) ----
+  function randCode(){ const a="ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let s=""; for(const n of crypto.getRandomValues(new Uint32Array(10))) s+=a[n%a.length]; return s; }
+  const copyCode=code=>{ try{ navigator.clipboard.writeText(code); flash("Copied "+code); }catch{ flash(code); } };
+  async function joinHousehold(){
+    const code=codeInput.trim().toUpperCase(); if(!code) return;
+    setJoining(true);
+    try{
+      const inv=await getDoc(doc(db,"invites",code));
+      if(!inv.exists()){ flash("Invalid code"); setJoining(false); return; }
+      const d=inv.data();
+      if(d.revoked){ flash("That code was revoked"); setJoining(false); return; }
+      if(d.expiresAt && d.expiresAt.toMillis && d.expiresAt.toMillis()<Date.now()){ flash("That code has expired"); setJoining(false); return; }
+      await setDoc(doc(db,"members",user.uid),{uid:user.uid,hid:d.hid,role:"member",email:user.email,viaInvite:code});
+      setHid(d.hid); setRole("member"); setAccess("ok"); setCodeInput("");
+    }catch(e){ flash("Couldn\u2019t join \u2014 check the code with whoever shared it"); }
+    setJoining(false);
+  }
+  async function openHouse(){
+    setHouseModal(true);
+    try{
+      const hs=await getDoc(doc(db,"households",hid)); if(hs.exists()) setHouseName(hs.data().name||"");
+      if(role==="head"){
+        const ms=await getDocs(query(collection(db,"members"),where("hid","==",hid)));
+        setMembers(ms.docs.map(d=>({id:d.id,...d.data()})));
+        const iv=await getDocs(query(collection(db,"invites"),where("hid","==",hid)));
+        setInvites(iv.docs.map(d=>({code:d.id,...d.data()})).filter(i=>!i.revoked));
+      }
+    }catch(e){ flash("Couldn\u2019t load household"); }
+  }
+  const generateInvite=()=>run("geninvite", async ()=>{
+    const code=randCode(); const exp=new Date(Date.now()+30*86400000);
+    await setDoc(doc(db,"invites",code),{hid,role:"member",createdBy:user.email,createdAt:serverTimestamp(),expiresAt:exp,revoked:false});
+    setInvites(v=>[{code,hid,role:"member",createdBy:user.email},...v]);
+    copyCode(code);
+  });
+  const revokeInvite=code=>run("revoke_"+code, async ()=>{ await setDoc(doc(db,"invites",code),{revoked:true},{merge:true}); setInvites(v=>v.filter(i=>i.code!==code)); });
+  const removeMember=uid=>run("rmmem_"+uid, async ()=>{ await deleteDoc(doc(db,"members",uid)); setMembers(v=>v.filter(m=>m.id!==uid)); });
+  async function leaveHousehold(){
+    if(!confirm("Leave this household? You\u2019ll need a new invite code to rejoin.")) return;
+    await run("leave", ()=>deleteDoc(doc(db,"members",user.uid)));
+    setHouseModal(false); setHid(null); setRole(null); setAccess("none");
+  }
 
   async function addItems(){
     const names=splitBlob(draft); if(!names.length) return;
@@ -444,7 +493,9 @@ function App(){
   if(access==="none") return html`<div class="gate">
     <img class="gatelogo" src="./icon-512.png" alt="Sync List" />
     <div class="brand">Sync List<span class="dot">.</span></div>
-    <p>Signed in as ${user.email}, but you're not part of a household yet. Ask your household admin to add you.</p>
+    <p>Signed in as ${user.email}. Enter the invite code from your household to join.</p>
+    <input class="tin" style="max-width:260px;text-align:center;text-transform:uppercase;letter-spacing:.12em" placeholder="INVITE CODE" value=${codeInput} onInput=${e=>setCodeInput(e.target.value.toUpperCase())} onKeyDown=${e=>{if(e.key==="Enter")joinHousehold();}} />
+    <button class="primary" style="max-width:260px" disabled=${!codeInput.trim()||joining} onClick=${joinHousehold}>${joining?html`<${Spin}/>Joining\u2026`:"Join household"}</button>
     <button class="ghost" onClick=${()=>signOut(auth)}>Sign out</button></div>`;
 
   return html`
@@ -689,6 +740,7 @@ function App(){
       <div class="dropdown">
         <div class="ddemail">${user.email}</div>
         <button class="ddm" onClick=${()=>{setMenu(false);setStapleSel({});setStaplesModal(true);}}>Staples</button>
+        <button class="ddm" onClick=${()=>{setMenu(false);openHouse();}}>Household</button>
         ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openStores();}}>Manage stores</button>`:null}
         ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openCats();}}>Manage categories</button>`:null}
         <div class="ddsep"></div>
@@ -708,6 +760,32 @@ function App(){
         <div class="lead" style="margin-top:10px">Add a category</div>
         <input class="tin" placeholder="e.g. Clothes" value=${newCat} onInput=${e=>setNewCat(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")addCat();}} />
         <button class="primary" disabled=${!newCat.trim()||isBusy("addcat")} onClick=${addCat}>${isBusy("addcat")?html`<${Spin}/>Adding\u2026`:"Add category"}</button>
+      </div>`:null}
+
+    <!-- household -->
+    ${houseModal?html`
+      <div class="scrim" onClick=${()=>setHouseModal(false)}></div>
+      <div class="sheet tall">
+        <div class="sheethead"><div class="lead">${houseName||"Household"}</div><button class="sheetx" onClick=${()=>setHouseModal(false)} aria-label="Close">\u00d7</button></div>
+        ${role==="head"?html`
+          <div class="hint">Members</div>
+          ${members.map(m=>html`
+            <div class="serow">
+              <span class="flex">${m.email}${m.role==="head"?html` <span class="tag">head</span>`:null}</span>
+              ${m.id!==user.uid?html`<button class="rowx" disabled=${isBusy("rmmem_"+m.id)} onClick=${()=>removeMember(m.id)}>${isBusy("rmmem_"+m.id)?html`<${Spin} g=${true}/>`:"\u00d7"}</button>`:null}
+            </div>`)}
+          <div class="lead" style="margin-top:12px">Invite codes</div>
+          <div class="hint">Share a code so someone can join this household. Reusable until it expires (30 days) or you revoke it.</div>
+          ${invites.map(i=>html`
+            <div class="serow">
+              <button class="mini2" onClick=${()=>copyCode(i.code)}>${i.code} \u2398</button>
+              <span class="flex"></span>
+              <button class="rowx" disabled=${isBusy("revoke_"+i.code)} onClick=${()=>revokeInvite(i.code)}>${isBusy("revoke_"+i.code)?html`<${Spin} g=${true}/>`:"\ud83d\uddd1"}</button>
+            </div>`)}
+          <button class="primary sm" disabled=${isBusy("geninvite")} onClick=${generateInvite}>${isBusy("geninvite")?html`<${Spin}/>Generating\u2026`:"Generate invite code"}</button>
+        `:html`<div class="hint">You\u2019re a member of this household.</div>`}
+        <div class="ddsep" style="margin:14px 0 4px"></div>
+        <button class="danger" disabled=${isBusy("leave")} onClick=${leaveHousehold}>Leave household</button>
       </div>`:null}
 
     <!-- staples palette -->
