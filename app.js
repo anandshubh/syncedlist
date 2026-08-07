@@ -106,6 +106,7 @@ function App(){
   const [purch,setPurch]=useState([]);
   const [page,setPage]=useState("list");
   const [checkedIn,setCheckedIn]=useState(null);
+  const [shopAdd,setShopAdd]=useState("");
   const [draft,setDraft]=useState("");
   const [parsing,setParsing]=useState(false);
   const [review,setReview]=useState([]);
@@ -316,9 +317,14 @@ function App(){
     const toAdd=[], needAssign=[];
     for(const n of names){
       if(existing.has(n)) continue; existing.add(n);
-      const meta=lookup(merged,n)||learned[n]||{stores:[],category:"Unsorted"};
-      if((meta.stores||[]).length) toAdd.push({name:n,stores:meta.stores,category:meta.category||"Unsorted"});
-      else needAssign.push({name:n,stores:[],category:meta.category||"Unsorted"});
+      const known=lookup(dict,n);   // "known" = already in the dictionary before this add
+      if(known && (known.stores||[]).length){
+        toAdd.push({name:n,stores:known.stores,category:known.category||"Unsorted"});
+      } else {
+        // every NEW item goes to the picker: AI category pre-filled, NO stores preselected
+        const cat=(known&&known.category)||(learned[n]&&learned[n].category)||"Unsorted";
+        needAssign.push({name:n,stores:[],category:cat});
+      }
     }
     if(toAdd.length){
       await run("additems", async ()=>{
@@ -333,6 +339,24 @@ function App(){
     }
     setDraft(""); setShowAdd(false);
     if(needAssign.length) setAssignList(needAssign);
+  }
+  // add an item straight to the store you're checked into (parser used for category only)
+  async function addFromShop(){
+    const nm=normalizeName(shopAdd); if(!nm||!checkedIn) return;
+    setShopAdd("");
+    await run("shopadd", async ()=>{
+      const known=lookup(dict,nm);
+      let category=(known&&known.category)||"Unsorted";
+      if(!known){
+        try{ const learned=await routeUnknowns([nm],stores,cats.filter(c=>c!=="Unsorted")); if(learned[nm]&&learned[nm].category) category=learned[nm].category; }catch{}
+      }
+      const dstores=Array.from(new Set([...((known&&known.stores)||[]),checkedIn]));
+      await setDoc(dref("dictionary",slug(nm)),{name:nm,stores:dstores,category},{merge:true});
+      const row=list.find(i=>i.key===nm);
+      if(row){ await setDoc(dref("list",row.id),{stores:Array.from(new Set([...(row.stores||[]),checkedIn])),checked:false},{merge:true}); }
+      else { await setDoc(newRef("list"),{key:nm,name:nm,stores:[checkedIn],category,checked:false,addedBy:(user.email||"").split("@")[0],ts:serverTimestamp()}); }
+    });
+    flash("Added to "+sname(checkedIn));
   }
   const updateAssign=(idx,patch)=>setAssignList(a=>a.map((x,i)=>i===idx?{...x,...patch}:x));
   const toggleAssignStore=(idx,sid)=>setAssignList(a=>a.map((x,i)=>i===idx?{...x,stores:x.stores.includes(sid)?x.stores.filter(y=>y!==sid):[...x.stores,sid]}:x));
@@ -666,6 +690,10 @@ function App(){
         <span class="cistore">${lsq(scolor(checkedIn),sname(checkedIn))}At ${sname(checkedIn)}</span>
         <button class="ghost ciout" onClick=${checkOut}>Check out</button>
       </div>
+      <div class="shopadd" style="display:flex;gap:8px;margin:2px 0 10px">
+        <input class="tin" style="flex:1" placeholder=${"Add to "+sname(checkedIn)+"\u2026"} value=${shopAdd} onInput=${e=>setShopAdd(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")addFromShop();}} />
+        <button class="mini2" disabled=${!shopAdd.trim()||isBusy("shopadd")} onClick=${addFromShop}>${isBusy("shopadd")?html`<${Spin} g=${true}/>`:"Add"}</button>
+      </div>
       ${shopGroups.length===0
         ? html`<div class="empty"><div class="big">Nothing left for ${sname(checkedIn)}</div>You're all done here \u2014 check out.</div>`
         : shopGroups.map(g=>{
@@ -812,7 +840,7 @@ function App(){
       <div class="dropdown">
         <div class="ddemail">${user.email}</div>
         <button class="ddm" onClick=${()=>{setMenu(false);setStapleSel({});setStaplesModal(true);}}>Staples</button>
-        <button class="ddm" onClick=${()=>{setMenu(false);openHouse();}}>Household</button>
+        <button class="ddm" onClick=${()=>{setMenu(false);openHouse();}}>Manage Household</button>
         ${isAdmin?html`<button class="ddm" onClick=${()=>{setMenu(false);setNewName("");setNewCode("");setAdminModal(true);}}>New household</button>`:null}
         ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openStores();}}>Manage stores</button>`:null}
         ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openCats();}}>Manage categories</button>`:null}
