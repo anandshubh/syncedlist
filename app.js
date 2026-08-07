@@ -140,6 +140,10 @@ function App(){
   const [pFilterStore,setPFilterStore]=useState("all");
   const [pFilterRange,setPFilterRange]=useState("30");
   const [sortBy,setSortBy]=useState("date");
+  const [pFilterCat,setPFilterCat]=useState("all");
+  const [dateDir,setDateDir]=useState("desc");
+  const [pPage,setPPage]=useState(0);
+  const [chipItem,setChipItem]=useState(null);
   const [cats,setCats]=useState(CATS);
   const [catModal,setCatModal]=useState(false);
   const [catDraft,setCatDraft]=useState([]);
@@ -384,6 +388,13 @@ function App(){
 
   // ---- item editor: remove, category (remembered), store mapping ----
   function openItem(it){ setItemModal(it); setEditCat(it.category||"Unsorted"); setEditStores([...(it.stores||[])]); setEditTags([...(it.tags||[])]); setTagDraft(""); }
+  async function recategorize(it,cat){
+    setChipItem(null);
+    await run("recat_"+it.id, async ()=>{
+      await setDoc(dref("list",it.id),{category:cat},{merge:true});
+      await setDoc(dref("dictionary",slug(it.key||it.name)),{name:it.key||it.name,category:cat},{merge:true});
+    });
+  }
   const toggleEditStore=sid=>setEditStores(es=>es.includes(sid)?es.filter(x=>x!==sid):[...es,sid]);
   function addTag(){ const t=tagDraft.trim(); if(!t) return; if(!editTags.some(x=>x.toLowerCase()===t.toLowerCase())) setEditTags(ts=>[...ts,t]); setTagDraft(""); }
   const removeTag=t=>setEditTags(ts=>ts.filter(x=>x!==t));
@@ -560,13 +571,19 @@ function App(){
     let ps=purch.slice();
     if(pendingOnly) ps=ps.filter(p=>p.status==="returning");
     if(pFilterStore!=="all") ps=ps.filter(p=>p.store===pFilterStore);
+    if(pFilterCat!=="all") ps=ps.filter(p=>((dict[p.name]&&dict[p.name].category)||"Unsorted")===pFilterCat);
     if(pFilterRange!=="all"){const lim=parseInt(pFilterRange,10);
       ps=ps.filter(p=>{const d=(new Date()-new Date(p.date+"T00:00:00"))/86400000; return d<=lim;});}
     return ps.sort((a,b)=>{
       if(sortBy==="store"){const c=sname(a.store).localeCompare(sname(b.store)); if(c) return c;}
-      return (b.date||"").localeCompare(a.date||"");
+      const dc=(a.date||"").localeCompare(b.date||"");
+      return dateDir==="asc"?dc:-dc;
     });
-  },[purch,pendingOnly,pFilterStore,pFilterRange,sortBy,stores]);
+  },[purch,pendingOnly,pFilterStore,pFilterCat,pFilterRange,sortBy,dateDir,dict,stores]);
+  const PER=20;
+  const pTotal=Math.max(1,Math.ceil(filteredPurch.length/PER));
+  const pClamped=Math.min(pPage,pTotal-1);
+  const pagedPurch=filteredPurch.slice(pClamped*PER,pClamped*PER+PER);
 
   const check=html`<svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
@@ -662,15 +679,16 @@ function App(){
             ${g.items.map(it=>html`
               <div class="lrow">
                 <button class=${"rowstar lead-star"+(isStaple(it.name)?" on":"")} onClick=${()=>toggleStaple(it.name,it.stores,it.category)}>${isBusy("star_"+slug(it.name))?html`<${Spin} g=${true}/>`:(isStaple(it.name)?"\u2605":"\u2606")}</button>
-                <button class="lmain" onClick=${()=>openItem(it)}>
+                <div class="lmain" role="button" tabindex="0" onClick=${()=>openItem(it)}>
                   <span class="lmid">
                     <span class="lname">${it.name}</span>
                     ${(it.tags&&it.tags.length)?html`<span class="ltags">${it.tags.map(t=>html`<span class="ltag">${t}</span>`)}</span>`:null}
+                    <button class="catchip" onClick=${e=>{e.stopPropagation();setChipItem(it);}}>${it.category||"Unsorted"}</button>
                   </span>
                   <span class="lstores">${it.stores.length
                     ? it.stores.map(s=>lsq(scolor(s),sname(s)))
                     : html`<em class="uns">unsorted</em>`}</span>
-                </button>
+                </div>
                 <button class="rowx" onClick=${()=>removeRow(it)}>${isBusy("rm_"+it.id)?html`<${Spin} g=${true}/>`:"\u00d7"}</button>
               </div>`)}
           <//>`)}`:null}
@@ -714,22 +732,33 @@ function App(){
     ${page==="history"?html`
       <div class="pagetitle">Purchase History</div>
       <div class="filters">
-        <button class=${"fbtn"+(pendingOnly?" on":"")} onClick=${()=>setPendingOnly(p=>!p)}>Pending returns</button>
-        <select class="sel sm" value=${sortBy} onChange=${e=>setSortBy(e.target.value)}>
+        <button class=${"fbtn"+(pendingOnly?" on":"")} onClick=${()=>{setPendingOnly(p=>!p);setPPage(0);}}>Pending returns</button>
+        <select class="sel sm" value=${sortBy} onChange=${e=>{setSortBy(e.target.value);setPPage(0);}}>
           <option value="date">Sort: Date</option><option value="store">Sort: Store</option>
         </select>
-        <select class="sel sm" value=${pFilterStore} onChange=${e=>setPFilterStore(e.target.value)}>
+        <button class="fbtn" onClick=${()=>{setDateDir(d=>d==="asc"?"desc":"asc");setPPage(0);}}>${dateDir==="asc"?"Oldest first":"Newest first"}</button>
+        <select class="sel sm" value=${pFilterCat} onChange=${e=>{setPFilterCat(e.target.value);setPPage(0);}}>
+          <option value="all">All categories</option>
+          ${cats.map(c=>html`<option value=${c}>${c}</option>`)}
+        </select>
+        <select class="sel sm" value=${pFilterStore} onChange=${e=>{setPFilterStore(e.target.value);setPPage(0);}}>
           <option value="all">All stores</option>
           ${stores.map(s=>html`<option value=${s.id}>${s.name}</option>`)}
         </select>
-        <select class="sel sm" value=${pFilterRange} onChange=${e=>setPFilterRange(e.target.value)}>
+        <select class="sel sm" value=${pFilterRange} onChange=${e=>{setPFilterRange(e.target.value);setPPage(0);}}>
           <option value="7">7 days</option><option value="30">30 days</option>
-          <option value="90">90 days</option><option value="all">All time</option>
+          <option value="90">90 days</option><option value="180">6 months</option>
+          <option value="365">1 year</option><option value="all">All time</option>
         </select>
       </div>
+      ${filteredPurch.length>PER?html`<div class="pager" style="display:flex;align-items:center;justify-content:center;gap:14px;margin:6px 0 10px">
+        <button class="ghost sm" disabled=${pClamped<=0} onClick=${()=>setPPage(p=>Math.max(0,p-1))}>Prev</button>
+        <span class="lcmuted">Page ${pClamped+1} of ${pTotal}</span>
+        <button class="ghost sm" disabled=${pClamped>=pTotal-1} onClick=${()=>setPPage(p=>p+1)}>Next</button>
+      </div>`:null}
       ${filteredPurch.length===0
         ? html`<div class="empty"><div class="big">No purchases</div>Items you mark bought show up here.</div>`
-        : filteredPurch.map(p=>{
+        : pagedPurch.map(p=>{
             const ret=p.status==="returning"; const d=ret?daysUntil(p.returnByDate):null;
             const rk="ret_"+p.id, kk="keep_"+p.id;
             return html`
@@ -751,6 +780,17 @@ function App(){
               </div>
             </div>`;})}`:null}
     `}
+
+    <!-- category chip picker -->
+    ${chipItem?html`
+      <div class="scrim" onClick=${()=>setChipItem(null)}></div>
+      <div class="sheet">
+        <div class="sheethead"><div class="lead">Category</div><button class="sheetx" onClick=${()=>setChipItem(null)} aria-label="Close">\u00d7</button></div>
+        <div class="hint">${chipItem.name}</div>
+        <div class="catgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+          ${cats.map(c=>html`<button class=${"catpick"+(chipItem.category===c?" on":"")} onClick=${()=>recategorize(chipItem,c)}>${c}</button>`)}
+        </div>
+      </div>`:null}
 
     <!-- add items -->
     ${showAdd?html`
