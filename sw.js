@@ -1,7 +1,7 @@
 // SyncedList service worker — network-first (new deploys land on next open),
 // cache fallback so the app shell opens offline. Firestore handles data offline itself.
 // New cache namespace for the fork so it never collides with the original app's cache.
-const CACHE = "syncedlist-v2";
+const CACHE = "syncedlist-v3";
 const SHELL = ["./","./index.html","./styles.css","./app.js","./config.js","./favicon.ico","./manifest.webmanifest","./icon-192.png","./icon-512.png"];
 
 self.addEventListener("install", e => {

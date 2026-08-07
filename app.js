@@ -38,14 +38,17 @@ function normalizeName(raw){
   s = s.replace(/^[-*\d\).\s]+/,"");
   s = s.replace(/\b(\d+(\.\d+)?)\s*(lbs?|lb|kg|g|oz|gallons?|gal|dozen|packs?|pkt|bunch(es)?|cans?|bottles?|boxes?|bags?)\b/gi,"");
   s = s.replace(/\b(a|an|some|few|couple of|one|two|three|four|five)\b/gi,"");
-  return s.replace(/\s+/g," ").trim();
+  s = s.replace(/\s+/g," ").trim();
+  return s.replace(/\b\w/g,c=>c.toUpperCase());
 }
 const splitBlob = t => t.split(/\r?\n|,|;|\u2022|\band\b/i).map(x=>x.trim()).filter(Boolean).map(normalizeName).filter(Boolean);
 function lookup(dict, name){
   if(dict[name]) return dict[name];
+  const nl=name.toLowerCase();
   for(const k of Object.keys(dict)){
-    if(name===k) return dict[k];
-    if(name.length>3 && (name.includes(k)||k.includes(name))) return dict[k];
+    const kl=k.toLowerCase();
+    if(nl===kl) return dict[k];
+    if(nl.length>3 && (nl.includes(kl)||kl.includes(nl))) return dict[k];
   }
   return null;
 }
@@ -163,6 +166,25 @@ function App(){
   const newRef=name=>doc(collection(db,"households",hid,name));
   const cfgDoc=()=>doc(db,"households",hid,"config","app");
   const toggleCat=key=>setCollapsed(c=>({...c,[key]:!c[key]}));
+  useEffect(()=>{
+    const order=["list","shop","history"];
+    const noswipe='input,textarea,select,.sheet,.scrim,.mselscrim,.msellist,.msel,.picker,.filters,.also,.lstores,.catgrid,.storecard';
+    let x0=0,y0=0,t0=0,skip=false;
+    const onStart=e=>{ const t=e.touches&&e.touches[0]; if(!t){skip=true;return;}
+      x0=t.clientX; y0=t.clientY; t0=Date.now();
+      skip = !!document.querySelector('.scrim,.mselscrim') || !!(e.target.closest && e.target.closest(noswipe)); };
+    const onEnd=e=>{ if(skip) return; const t=e.changedTouches&&e.changedTouches[0]; if(!t) return;
+      const dx=t.clientX-x0, dy=t.clientY-y0;
+      if(Date.now()-t0>600) return;
+      if(Math.abs(dx)<70 || Math.abs(dx)<Math.abs(dy)*1.5) return;
+      const i=order.indexOf(page); if(i<0) return;
+      const ni = dx<0 ? Math.min(order.length-1,i+1) : Math.max(0,i-1);
+      if(ni!==i) setPage(order[ni]);
+    };
+    document.addEventListener('touchstart',onStart,{passive:true});
+    document.addEventListener('touchend',onEnd,{passive:true});
+    return()=>{ document.removeEventListener('touchstart',onStart); document.removeEventListener('touchend',onEnd); };
+  },[page]);
   const isBusy=k=>!!busy[k];
   async function run(key, fn){ setBusy(b=>({...b,[key]:true}));
     try{ await fn(); } catch(e){ flash("Something went wrong"); }
@@ -317,10 +339,10 @@ function App(){
       setParsing(false);
     }
     const merged={...dict,...learned};
-    const existing=new Set(list.map(i=>i.key));
+    const existing=new Set(list.map(i=>(i.key||"").toLowerCase()));
     const toAdd=[], needAssign=[];
     for(const n of names){
-      if(existing.has(n)) continue; existing.add(n);
+      if(existing.has(n.toLowerCase())) continue; existing.add(n.toLowerCase());
       const known=lookup(dict,n);   // "known" = already in the dictionary before this add
       if(known && (known.stores||[]).length){
         toAdd.push({name:n,stores:known.stores,category:known.category||"Unsorted"});
@@ -501,8 +523,8 @@ function App(){
     setNewStaple("");
   }
   async function addStaplesToList(){
-    const existing=new Set(list.map(i=>i.key));
-    const add=staples.filter(s=>stapleSel[s.id] && !existing.has(s.name));
+    const existing=new Set(list.map(i=>(i.key||"").toLowerCase()));
+    const add=staples.filter(s=>stapleSel[s.id] && !existing.has((s.name||"").toLowerCase()));
     if(!add.length){ setStaplesModal(false); setStapleSel({}); return; }
     await run("addstaples", async ()=>{
       const b=writeBatch(db);
@@ -563,8 +585,14 @@ function App(){
     });
     return groupByCat(l,"list");
   },[list,collapsed,cats,exclTags,exclStores]);
+  const allCollapsed=listGroups.length>0 && listGroups.every(g=>!g.open);
+  const toggleAllPanels=()=>{ const collapse=!allCollapsed; setCollapsed(c=>{const nc={...c}; listGroups.forEach(g=>{nc[g.key]=collapse;}); return nc;}); };
   const shopItems=useMemo(()=>list.filter(i=>i.stores.includes(checkedIn)),[list,checkedIn]);
   const shopGroups=useMemo(()=>groupByCat(shopItems,"shop:"+checkedIn),[shopItems,collapsed,checkedIn,cats]);
+  const pickerStores=useMemo(()=>{
+    const cnt=s=>list.filter(i=>i.stores.includes(s.id)&&!i.checked).length;
+    return stores.map((s,idx)=>({s,n:cnt(s),idx})).sort((a,b)=>(b.n-a.n)||(a.idx-b.idx));
+  },[stores,list]);
   const shopChecked=shopItems.filter(i=>i.checked).length;
 
   const filteredPurch=useMemo(()=>{
@@ -667,9 +695,13 @@ function App(){
             </div>`:null}
         </div>`:null}
       ${list.length>0?html`
-        <div class="listcount">${(exclTags.size||exclStores.size)
-          ? html`${listGroups.reduce((a,g)=>a+g.items.length,0)} <span class="lcmuted">of ${list.length} items</span>`
-          : html`${list.length} item${list.length===1?"":"s"}`}</div>`:null}
+        <div class="listtools">
+          <span class="lt-side"></span>
+          <div class="listcount">${(exclTags.size||exclStores.size)
+            ? html`${listGroups.reduce((a,g)=>a+g.items.length,0)} <span class="lcmuted">of ${list.length} items</span>`
+            : html`${list.length} item${list.length===1?"":"s"}`}</div>
+          <button class="lt-side lt-btn" onClick=${toggleAllPanels}>${allCollapsed?"Expand all":"Collapse all"}</button>
+        </div>`:null}
       ${(exclTags.size||exclStores.size)&&listGroups.length===0
         ? html`<div class="empty"><div class="big">Nothing matches</div>No items for these filters \u2014 reset with \u201cAll\u201d.</div>`
         : list.length===0
@@ -696,11 +728,10 @@ function App(){
     ${page==="shop"?( !checkedIn ? html`
       <div class="pickhead">Which store are you at?</div>
       <div class="picker">
-        ${stores.map(s=>{const n=list.filter(i=>i.stores.includes(s.id)&&!i.checked).length;
-          return html`<button class="storecard" style=${"--sc:"+s.color} onClick=${()=>setCheckedIn(s.id)}>
+        ${pickerStores.map(({s,n})=>html`<button class=${"storecard"+(n===0?" empty":"")} style=${"--sc:"+s.color} onClick=${()=>setCheckedIn(s.id)}>
             <span class="scname">${s.name}</span>
             <span class="sccount">${n} item${n===1?"":"s"}</span>
-          </button>`;})}
+          </button>`)}
         <button class="storecard addtile" onClick=${openStores}><span class="addplus">+</span><span class="sccount">Add store</span></button>
       </div>`
     : html`
