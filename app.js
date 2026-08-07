@@ -546,24 +546,24 @@ function App(){
 
   const check=html`<svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-  if(user===undefined) return html`<div class="gate"><div class="brand">Sync List<span class="dot">.</span></div><${Loader} label="Starting\u2026"/></div>`;
+  if(user===undefined) return html`<div class="gate"><div class="brand">SyncedList<span class="dot">.</span></div><${Loader} label="Starting\u2026"/></div>`;
   if(user===null) return html`<div class="gate">
-    <img class="gatelogo" src="./icon-512.png" alt="Sync List" />
-    <div class="brand">Sync List<span class="dot">.</span></div>
+    <img class="gatelogo" src="./icon-512.png" alt="SyncedList" />
+    <div class="brand">SyncedList<span class="dot">.</span></div>
     <p>Your shared grocery list. Sign in with Google to continue.</p>
     <button class="primary" onClick=${signIn}>Sign in with Google</button></div>`;
-  if(access===undefined) return html`<div class="gate"><div class="brand">Sync List<span class="dot">.</span></div><${Loader} label="Checking access\u2026"/></div>`;
+  if(access===undefined) return html`<div class="gate"><div class="brand">SyncedList<span class="dot">.</span></div><${Loader} label="Checking access\u2026"/></div>`;
   if(access==="none") return isAdmin ? html`<div class="gate">
-    <img class="gatelogo" src="./icon-512.png" alt="Sync List" />
-    <div class="brand">Sync List<span class="dot">.</span></div>
+    <img class="gatelogo" src="./icon-512.png" alt="SyncedList" />
+    <div class="brand">SyncedList<span class="dot">.</span></div>
     <p>Signed in as ${user.email} (admin). Create a household and send its head an invite code \u2014 they redeem it, no uid needed.</p>
     <input class="tin" style="max-width:280px" placeholder="New household name" value=${newName} onInput=${e=>setNewName(e.target.value)} />
     <button class="primary" style="max-width:280px" disabled=${!newName.trim()||isBusy("newhouse")} onClick=${createHouseholdInvite}>${isBusy("newhouse")?html`<${Spin}/>Creating\u2026`:"Create + copy head invite"}</button>
     <button class="ghost sm" style="max-width:280px" disabled=${!newName.trim()||isBusy("newhouse")} onClick=${createHouseholdSelf}>Create one for myself (I'm the head)</button>
     ${newCode?html`<p style="max-width:280px;margin:6px 0 0">Head invite code (claim once): <b onClick=${()=>copyCode(newCode)} style="cursor:pointer;letter-spacing:.08em">${newCode}</b> \u2014 tap to copy, share it with the new head.</p>`:null}
     <button class="ghost" onClick=${()=>signOut(auth)}>Sign out</button></div>` : html`<div class="gate">
-    <img class="gatelogo" src="./icon-512.png" alt="Sync List" />
-    <div class="brand">Sync List<span class="dot">.</span></div>
+    <img class="gatelogo" src="./icon-512.png" alt="SyncedList" />
+    <div class="brand">SyncedList<span class="dot">.</span></div>
     <p>Signed in as ${user.email}. Enter the invite code from your household to join.</p>
     <input class="tin" style="max-width:260px;text-align:center;text-transform:uppercase;letter-spacing:.12em" placeholder="INVITE CODE" value=${codeInput} onInput=${e=>{setCodeInput(e.target.value.toUpperCase());setJoinErr("");}} onKeyDown=${e=>{if(e.key==="Enter")joinHousehold();}} />
     ${joinErr?html`<p style="color:var(--red);max-width:280px;margin:4px 0 0;font-size:14px">${joinErr}</p>`:null}
@@ -572,7 +572,7 @@ function App(){
 
   return html`
     <div class="top">
-      <div class="brand"><img class="brandicon" src="./icon-192.png" alt="" />Sync List<span class="dot">.</span></div>
+      <div class="brand"><img class="brandicon" src="./icon-192.png" alt="" />SyncedList<span class="dot">.</span></div>
       <button class="hbtn" onClick=${()=>setMenu(true)} aria-label="Menu">\u2630</button>
     </div>
 
@@ -729,7 +729,7 @@ function App(){
       <div class="scrim" onClick=${()=>setShowAdd(false)}></div>
       <div class="sheet">
         <div class="sheethead"><div class="lead">Paste your voice list</div><button class="sheetx" onClick=${()=>setShowAdd(false)} aria-label="Close">\u00d7</button></div>
-        <div class="hint">Alexa, WhatsApp, Notes \u2014 one line or comma-separated. Sync List splits it and files each item to the right store.</div>
+        <div class="hint">Alexa, WhatsApp, Notes \u2014 one line or comma-separated. SyncedList splits it and files each item to the right store.</div>
         <textarea placeholder=${"2 lbs onions\ncilantro\npaneer\nmilk\ntoor dal"} value=${draft} onInput=${e=>setDraft(e.target.value)}></textarea>
         <button class="primary" disabled=${parsing||!draft.trim()} onClick=${addItems}>${parsing?html`<${Spin}/>Routing\u2026`:"Add to list"}</button>
       </div>`:null}
