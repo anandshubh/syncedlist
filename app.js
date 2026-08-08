@@ -435,13 +435,13 @@ function App(){
     try{ await setDoc(cfgDoc(),{categories:next},{merge:true}); flash("Added "+label); return label; }
     catch(e){ flash("Only a head can add categories"); return null; }
   }
-  async function addStoreInline(){
+  async function addStoreInline(onAdded){
     const raw=(prompt("New store name")||"").trim(); if(!raw) return;
     const nm=raw, id=slug(nm);
-    if(stores.some(s=>s.id===id)){ setEditStores(es=>es.includes(id)?es:[...es,id]); return; }
+    if(stores.some(s=>s.id===id)){ onAdded&&onAdded(id); return; }
     const color="#"+("00000"+Math.floor(Math.random()*0xffffff).toString(16)).slice(-6);
     const next=[...stores.map(serStore),{id,name:nm,color,canonicalStoreId:null}];
-    try{ await setDoc(cfgDoc(),{stores:next},{merge:true}); setEditStores(es=>[...es,id]); flash("Added "+nm); }
+    try{ await setDoc(cfgDoc(),{stores:next},{merge:true}); onAdded&&onAdded(id); flash("Added "+nm); }
     catch(e){ flash("Only a head can add stores"); }
   }
   async function recategorize(it,cat){
@@ -766,6 +766,7 @@ function App(){
             <span class="scname">${s.name}</span>
             <span class="sccount">${n} item${n===1?"":"s"}</span>
           </button>`)}
+        ${role==="head"?html`<button class="storecard addcard" onClick=${()=>addStoreInline(id=>setCheckedIn(id))}><span class="scname">+ Add store</span></button>`:null}
         <button class="storecard addtile" onClick=${openStores}><span class="addplus">+</span><span class="sccount">Add store</span></button>
       </div>`
     : html`
@@ -854,6 +855,7 @@ function App(){
         <div class="hint">${tc(chipItem.name)}</div>
         <div class="catgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
           ${cats.map(c=>html`<button class=${"catpick"+(chipItem.category===c?" on":"")} onClick=${()=>recategorize(chipItem,c)}>${c}</button>`)}
+          ${role==="head"?html`<button class="catpick addcat" onClick=${async()=>{const c=await addCategoryInline(); if(c) recategorize(chipItem,c);}}>+ Add category</button>`:null}
         </div>
       </div>`:null}
 
@@ -890,7 +892,7 @@ function App(){
         </select>
         <div class="hint">Stores</div>
         <div class="chiprow">${stores.map(s=>html`<button class=${"chip mini"+(editStores.includes(s.id)?" pick":"")} style=${"--sc:"+s.color} onClick=${()=>toggleEditStore(s.id)}>
-          ${lsq(s.color,s.name)}${s.name}</button>`)}${role==="head"?html`<button class="chip mini addchip" onClick=${addStoreInline}>+ Add store</button>`:null}</div>
+          ${lsq(s.color,s.name)}${s.name}</button>`)}${role==="head"?html`<button class="chip mini addchip" onClick=${()=>addStoreInline(id=>setEditStores(es=>es.includes(id)?es:[...es,id]))}>+ Add store</button>`:null}</div>
         <div class="hint">Tags (for whom)</div>
         <div class="tagedit">
           ${editTags.map(t=>html`<span class="tagchip on">${t}<button class="tagx" onClick=${()=>removeTag(t)}>\u00d7</button></span>`)}
@@ -1037,12 +1039,13 @@ function App(){
         ${assignList.map((it,idx)=>html`
           <div class="arow">
             <div class="aname">${tc(it.name)}</div>
-            <select class="sel sm" value=${it.category} onChange=${e=>updateAssign(idx,{category:e.target.value})}>
+            <select class="sel sm" value=${it.category} onChange=${async e=>{ if(e.target.value==="__add__"){ const c=await addCategoryInline(); if(c) updateAssign(idx,{category:c}); } else updateAssign(idx,{category:e.target.value}); }}>
               ${cats.map(c=>html`<option value=${c}>${c}</option>`)}
+              ${role==="head"?html`<option value="__add__">+ Add category\u2026</option>`:null}
             </select>
             <div class="chiprow">
               ${stores.map(s=>html`<button class=${"chip mini"+(it.stores.includes(s.id)?" pick":"")} style=${"--sc:"+s.color} onClick=${()=>toggleAssignStore(idx,s.id)}>
-                ${lsq(s.color,s.name)}${s.name}</button>`)}
+                ${lsq(s.color,s.name)}${s.name}</button>`)}${role==="head"?html`<button class="chip mini addchip" onClick=${()=>addStoreInline(id=>setAssignList(a=>a.map((x,i)=>i===idx?{...x,stores:x.stores.includes(id)?x.stores:[...x.stores,id]}:x)))}>+ Add store</button>`:null}
             </div>
           </div>`)}
         <button class="primary" disabled=${isBusy("assign")} onClick=${commitAssign}>${isBusy("assign")?html`<${Spin}/>Adding\u2026`:"Add to list"}</button>

@@ -306,3 +306,5 @@ textarea:focus,.tin:focus{outline:none;border-color:var(--brand)}
 .storecard.empty{opacity:.5}
 
 .chip.addchip{border:1px dashed var(--muted);color:var(--muted);background:none}
+.catpick.addcat{border-style:dashed;color:var(--muted)}
+.storecard.addcard{border:1px dashed var(--muted);color:var(--muted);display:flex;align-items:center;justify-content:center;min-height:60px}
