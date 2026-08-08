@@ -30,6 +30,7 @@ const CATS = ["Produce","Bakery","Dairy","Meat","Frozen","Spices","Staples","Hou
 const STORE_SWATCHES = ["#f2a7a1","#a8c8ec","#f2c79b","#a9d8b8","#c9b8e8","#9ad9d2","#f0b6d3","#e0cfa0"];
 
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,120) || "x";
+const tc = s => (s||"").replace(/\b\w/g, c=>c.toUpperCase());  // Title-Case for display
 const todayISO = () => new Date().toISOString().slice(0,10);
 const daysUntil = iso => Math.ceil((new Date(iso+"T00:00:00") - new Date(new Date().toDateString())) / 86400000);
 
@@ -227,6 +228,23 @@ function App(){
     const u5=onSnapshot(col("staples"),snap=>{const a=[];snap.forEach(d=>a.push({id:d.id,...d.data()}));setStaples(a);});
     return()=>{u1();u2();u3();u4();u5();};
   },[hid]);
+  // one-time cleanup: Title-Case the stored names for this household (head runs it once)
+  useEffect(()=>{
+    if(!hid || role!=="head") return;
+    (async()=>{
+      try{
+        const cfg=await getDoc(cfgDoc());
+        if(!cfg.exists() || cfg.data().namesMigrated) return;
+        const b=writeBatch(db);
+        for(const colName of ["list","dictionary","staples"]){
+          const snap=await getDocs(col(colName));
+          snap.forEach(d=>{const x=d.data(); const nn=tc(x.name||""); if(x.name && nn!==x.name) b.set(d.ref,{name:nn},{merge:true});});
+        }
+        b.set(cfgDoc(),{namesMigrated:true},{merge:true});
+        await b.commit();
+      }catch(e){}
+    })();
+  },[hid,role]);
 
   async function signIn(){try{await signInWithPopup(auth,new GoogleAuthProvider());}catch{flash("Sign-in failed");}}
   function randHid(){ return "h_"+randCode().toLowerCase(); }
@@ -410,6 +428,22 @@ function App(){
 
   // ---- item editor: remove, category (remembered), store mapping ----
   function openItem(it){ setItemModal(it); setEditCat(it.category||"Unsorted"); setEditStores([...(it.stores||[])]); setEditTags([...(it.tags||[])]); setTagDraft(""); }
+  async function addCategoryInline(){
+    const raw=(prompt("New category name")||"").trim(); if(!raw) return null;
+    const label=tc(raw); if(cats.includes(label)) return label;
+    const next=[...cats.filter(c=>c!=="Unsorted"),label,"Unsorted"];
+    try{ await setDoc(cfgDoc(),{categories:next},{merge:true}); flash("Added "+label); return label; }
+    catch(e){ flash("Only a head can add categories"); return null; }
+  }
+  async function addStoreInline(){
+    const raw=(prompt("New store name")||"").trim(); if(!raw) return;
+    const nm=raw, id=slug(nm);
+    if(stores.some(s=>s.id===id)){ setEditStores(es=>es.includes(id)?es:[...es,id]); return; }
+    const color="#"+("00000"+Math.floor(Math.random()*0xffffff).toString(16)).slice(-6);
+    const next=[...stores.map(serStore),{id,name:nm,color,canonicalStoreId:null}];
+    try{ await setDoc(cfgDoc(),{stores:next},{merge:true}); setEditStores(es=>[...es,id]); flash("Added "+nm); }
+    catch(e){ flash("Only a head can add stores"); }
+  }
   async function recategorize(it,cat){
     setChipItem(null);
     await run("recat_"+it.id, async ()=>{
@@ -705,7 +739,7 @@ function App(){
       ${(exclTags.size||exclStores.size)&&listGroups.length===0
         ? html`<div class="empty"><div class="big">Nothing matches</div>No items for these filters \u2014 reset with \u201cAll\u201d.</div>`
         : list.length===0
-        ? html`<div class="empty"><div class="big">List is empty</div>Tap \u201cAdd items\u201d or pull from \u2605 Staples.</div>`
+        ? html`<div class="empty"><div class="big">List is empty</div>Tap \u201cAdd items\u201d or pull from \u2605 Frequently Bought.</div>`
         : listGroups.map(g=>html`
           <${Panel} title=${g.cat} count=${g.items.length} open=${g.open} onToggle=${()=>toggleCat(g.key)}>
             ${g.items.map(it=>html`
@@ -713,7 +747,7 @@ function App(){
                 <button class=${"rowstar lead-star"+(isStaple(it.name)?" on":"")} onClick=${()=>toggleStaple(it.name,it.stores,it.category)}>${isBusy("star_"+slug(it.name))?html`<${Spin} g=${true}/>`:(isStaple(it.name)?"\u2605":"\u2606")}</button>
                 <div class="lmain" role="button" tabindex="0" onClick=${()=>openItem(it)}>
                   <span class="lmid">
-                    <span class="lname">${it.name}</span>
+                    <span class="lname">${tc(it.name)}</span>
                     ${(it.tags&&it.tags.length)?html`<span class="ltags">${it.tags.map(t=>html`<span class="ltag">${t}</span>`)}</span>`:null}
                     <button class="catchip" onClick=${e=>{e.stopPropagation();setChipItem(it);}}>${it.category||"Unsorted"}</button>
                   </span>
@@ -753,7 +787,7 @@ function App(){
                 <div class=${"item"+(it.checked?" done":"")} style=${"--sc:"+scolor(checkedIn)} onClick=${()=>toggle(it)}>
                   <div class="box">${check}</div>
                   <div class="label">
-                    <span class="lname">${it.name}</span>
+                    <span class="lname">${tc(it.name)}</span>
                     ${(it.tags&&it.tags.length)?html`<span class="ltags">${it.tags.map(t=>html`<span class="ltag">${t}</span>`)}</span>`:null}
                   </div>
                   ${it.stores.length>1?html`<div class="also">${it.stores.filter(x=>x!==checkedIn).map(x=>lsq(scolor(x),sname(x)))}</div>`:null}
@@ -796,7 +830,7 @@ function App(){
             <div class=${"prow"+(ret?(d<0?" over":d<=5?" due":""):"")}>
               <button class=${"rowstar lead-star"+(isStaple(p.name)?" on":"")} onClick=${()=>toggleStaple(p.name,(dict[p.name]&&dict[p.name].stores)||[p.store],(dict[p.name]&&dict[p.name].category)||"Unsorted")}>${isStaple(p.name)?"\u2605":"\u2606"}</button>
               <div class="pinfo">
-                <span class="pname">${p.name}</span>
+                <span class="pname">${tc(p.name)}</span>
                 <span class="pmeta">${lsq(scolor(p.store),sname(p.store))}${sname(p.store)} \u00b7 ${p.date}
                   ${ret?html`\u00b7 <b>${d<0?"overdue":"return in "+d+"d"}</b>`:null}</span>
               </div>
@@ -817,7 +851,7 @@ function App(){
       <div class="scrim" onClick=${()=>setChipItem(null)}></div>
       <div class="sheet">
         <div class="sheethead"><div class="lead">Category</div><button class="sheetx" onClick=${()=>setChipItem(null)} aria-label="Close">\u00d7</button></div>
-        <div class="hint">${chipItem.name}</div>
+        <div class="hint">${tc(chipItem.name)}</div>
         <div class="catgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
           ${cats.map(c=>html`<button class=${"catpick"+(chipItem.category===c?" on":"")} onClick=${()=>recategorize(chipItem,c)}>${c}</button>`)}
         </div>
@@ -837,7 +871,7 @@ function App(){
       <div class="sheet">
         <div class="lead">New items \u2014 fix any store</div>
         ${review.map(k=>{const meta=dict[k]||{stores:[],category:"Unsorted"};return html`
-          <div class="rrow"><span class="rname">${k}</span><span class="rcat">${meta.category}</span>
+          <div class="rrow"><span class="rname">${tc(k)}</span><span class="rcat">${meta.category}</span>
             ${stores.map(s=>html`<button class=${"chip mini"+(meta.stores.includes(s.id)?" pick":"")} style=${"--sc:"+s.color} onClick=${()=>toggleReviewStore(k,s.id)}>
               ${lsq(s.color,s.name)}${s.name}</button>`)}
           </div>`;})}
@@ -848,14 +882,15 @@ function App(){
     ${itemModal?html`
       <div class="scrim" onClick=${()=>setItemModal(null)}></div>
       <div class="sheet">
-        <div class="lead">${itemModal.name}</div>
+        <div class="lead">${tc(itemModal.name)}</div>
         <div class="hint">Category</div>
-        <select class="sel" value=${editCat} onChange=${e=>setEditCat(e.target.value)}>
+        <select class="sel" value=${editCat} onChange=${async e=>{ if(e.target.value==="__add__"){ const c=await addCategoryInline(); if(c) setEditCat(c); } else setEditCat(e.target.value); }}>
           ${cats.map(c=>html`<option value=${c}>${c}</option>`)}
+          ${role==="head"?html`<option value="__add__">+ Add category\u2026</option>`:null}
         </select>
         <div class="hint">Stores</div>
         <div class="chiprow">${stores.map(s=>html`<button class=${"chip mini"+(editStores.includes(s.id)?" pick":"")} style=${"--sc:"+s.color} onClick=${()=>toggleEditStore(s.id)}>
-          ${lsq(s.color,s.name)}${s.name}</button>`)}</div>
+          ${lsq(s.color,s.name)}${s.name}</button>`)}${role==="head"?html`<button class="chip mini addchip" onClick=${addStoreInline}>+ Add store</button>`:null}</div>
         <div class="hint">Tags (for whom)</div>
         <div class="tagedit">
           ${editTags.map(t=>html`<span class="tagchip on">${t}<button class="tagx" onClick=${()=>removeTag(t)}>\u00d7</button></span>`)}
@@ -894,7 +929,7 @@ function App(){
         <div class="hint">These items are only at ${delStore.name}. Pick a new store for each, or leave blank to move it to Unsorted.</div>
         ${orphansOf(delStore.id).map(it=>html`
           <div class="orow">
-            <span class="rname">${it.name}</span>
+            <span class="rname">${tc(it.name)}</span>
             <div class="chiprow">
               ${stores.filter(s=>s.id!==delStore.id).map(s=>html`
                 <button class=${"chip mini"+((reassign[it.id]===s.id)?" pick":"")} style=${"--sc:"+s.color} onClick=${()=>setReassign(r=>({...r,[it.id]:r[it.id]===s.id?undefined:s.id}))}>
@@ -910,13 +945,13 @@ function App(){
       <div class="menuscrim" onClick=${()=>setMenu(false)}></div>
       <div class="dropdown">
         <div class="ddemail">${user.email}</div>
-        <button class="ddm" onClick=${()=>{setMenu(false);setStapleSel({});setStaplesModal(true);}}>Staples</button>
+        <button class="ddm" onClick=${()=>{setMenu(false);setStapleSel({});setStaplesModal(true);}}>Frequently Bought</button>
         <button class="ddm" onClick=${()=>{setMenu(false);openHouse();}}>Manage Household</button>
-        ${isAdmin?html`<button class="ddm" onClick=${()=>{setMenu(false);setNewName("");setNewCode("");setAdminModal(true);}}>New household</button>`:null}
-        ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openStores();}}>Manage stores</button>`:null}
-        ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openCats();}}>Manage categories</button>`:null}
+        ${isAdmin?html`<button class="ddm" onClick=${()=>{setMenu(false);setNewName("");setNewCode("");setAdminModal(true);}}>New Household</button>`:null}
+        ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openStores();}}>Manage Stores</button>`:null}
+        ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openCats();}}>Manage Categories</button>`:null}
         <div class="ddsep"></div>
-        <button class="ddm ddout" onClick=${()=>signOut(auth)}>Sign out</button>
+        <button class="ddm ddout" onClick=${()=>signOut(auth)}>Sign Out</button>
       </div>`:null}
 
     <!-- categories -->
@@ -977,7 +1012,7 @@ function App(){
     ${staplesModal?html`
       <div class="scrim" onClick=${()=>setStaplesModal(false)}></div>
       <div class="sheet tall">
-        <div class="lead">Staples</div>
+        <div class="lead">Frequently Bought</div>
         <div class="hint">Your regulars. Tick what you need this week and add them all at once. Items already on the list are greyed out.</div>
         <input class="tin" placeholder="Add a staple (e.g. milk)" value=${newStaple} onInput=${e=>setNewStaple(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")addNewStaple();}} />
         ${staples.length===0?html`<div class="hint">No staples yet \u2014 star items on the List or in Purchase History to keep them here.</div>`:null}
@@ -1001,7 +1036,7 @@ function App(){
         <div class="hint">Couldn't auto-detect where to buy ${assignList.length>1?"these":"this"}. Pick a store (and category) \u2014 I'll remember for next time.</div>
         ${assignList.map((it,idx)=>html`
           <div class="arow">
-            <div class="aname">${it.name}</div>
+            <div class="aname">${tc(it.name)}</div>
             <select class="sel sm" value=${it.category} onChange=${e=>updateAssign(idx,{category:e.target.value})}>
               ${cats.map(c=>html`<option value=${c}>${c}</option>`)}
             </select>
