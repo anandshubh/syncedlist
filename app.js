@@ -116,6 +116,9 @@ function App(){
   const [review,setReview]=useState([]);
   const [assignList,setAssignList]=useState([]);
   const [collapsed,setCollapsed]=useState({});
+  const [reorder,setReorder]=useState(false);
+  const [order,setOrder]=useState(null);
+  const [dragI,setDragI]=useState(-1);
   const [toast,setToast]=useState("");
   const [online,setOnline]=useState(navigator.onLine);
   const [busy,setBusy]=useState({});
@@ -169,7 +172,7 @@ function App(){
   const toggleCat=key=>setCollapsed(c=>({...c,[key]:!c[key]}));
   useEffect(()=>{
     const order=["list","shop","history"];
-    const noswipe='input,textarea,select,.sheet,.scrim,.mselscrim,.msellist,.msel,.picker,.filters,.also,.lstores,.catgrid,.storecard';
+    const noswipe='input,textarea,select,.sheet,.scrim,.mselscrim,.msellist,.msel,.picker,.filters,.also,.lstores,.catgrid,.storecard,.reorow';
     let x0=0,y0=0,t0=0,skip=false;
     const onStart=e=>{ const t=e.touches&&e.touches[0]; if(!t){skip=true;return;}
       x0=t.clientX; y0=t.clientY; t0=Date.now();
@@ -621,6 +624,17 @@ function App(){
   },[list,collapsed,cats,exclTags,exclStores]);
   const allCollapsed=listGroups.length>0 && listGroups.every(g=>!g.open);
   const toggleAllPanels=()=>{ const collapse=!allCollapsed; setCollapsed(c=>{const nc={...c}; listGroups.forEach(g=>{nc[g.key]=collapse;}); return nc;}); };
+  function startCatDrag(e,i){
+    if(role!=="head") return;
+    if(e.preventDefault) e.preventDefault();
+    let cur=(order||cats.filter(c=>c!=="Unsorted")).slice();
+    let from=i; setDragI(i); setOrder(cur.slice());
+    const pt=ev=>ev.touches?ev.touches[0]:ev;
+    const move=ev=>{ const p=pt(ev); const el=document.elementFromPoint(p.clientX,p.clientY); const row=el&&el.closest?el.closest(".reorow[data-i]"):null; if(!row) return; const to=parseInt(row.getAttribute("data-i"),10); if(isNaN(to)||to===from) return; const [m]=cur.splice(from,1); cur.splice(to,0,m); from=to; setDragI(to); setOrder(cur.slice()); };
+    const up=()=>{ window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); setDragI(-1); const next=[...cur,"Unsorted"]; setOrder(null); run("catreorder",()=>setDoc(cfgDoc(),{categories:next},{merge:true})); };
+    window.addEventListener("pointermove",move,{passive:false});
+    window.addEventListener("pointerup",up,{once:true});
+  }
   const shopItems=useMemo(()=>list.filter(i=>i.stores.includes(checkedIn)),[list,checkedIn]);
   const shopGroups=useMemo(()=>groupByCat(shopItems,"shop:"+checkedIn),[shopItems,collapsed,checkedIn,cats]);
   const pickerStores=useMemo(()=>{
@@ -730,13 +744,17 @@ function App(){
         </div>`:null}
       ${list.length>0?html`
         <div class="listtools">
-          <span class="lt-side"></span>
+          ${role==="head"?html`<button class="lt-side lt-btn" style="text-align:left" onClick=${()=>{setReorder(r=>!r);setOrder(null);setDragI(-1);}}>${reorder?"Done":"Reorder"}</button>`:html`<span class="lt-side"></span>`}
           <div class="listcount">${(exclTags.size||exclStores.size)
             ? html`${listGroups.reduce((a,g)=>a+g.items.length,0)} <span class="lcmuted">of ${list.length} items</span>`
             : html`${list.length} item${list.length===1?"":"s"}`}</div>
           <button class="lt-side lt-btn" onClick=${toggleAllPanels}>${allCollapsed?"Expand all":"Collapse all"}</button>
         </div>`:null}
-      ${(exclTags.size||exclStores.size)&&listGroups.length===0
+      ${reorder ? html`<div class="reorderlist">
+        <div class="hint" style="margin:2px 0 8px">Drag to reorder categories \u2014 applies to List and Shop.</div>
+        ${(order||cats.filter(c=>c!=="Unsorted")).map((c,i)=>html`<div class=${"reorow"+(dragI===i?" drag":"")} data-i=${i} onPointerDown=${e=>startCatDrag(e,i)}><span class="grip">\u2630</span><span class="flex">${c}</span></div>`)}
+        <div class="reorow dim"><span class="grip">\u2630</span><span class="flex">Unsorted</span><span class="tag">pinned</span></div>
+      </div>` : (exclTags.size||exclStores.size)&&listGroups.length===0
         ? html`<div class="empty"><div class="big">Nothing matches</div>No items for these filters \u2014 reset with \u201cAll\u201d.</div>`
         : list.length===0
         ? html`<div class="empty"><div class="big">List is empty</div>Tap \u201cAdd items\u201d or pull from \u2605 Frequently Bought.</div>`

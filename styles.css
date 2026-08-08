@@ -308,3 +308,11 @@ textarea:focus,.tin:focus{outline:none;border-color:var(--brand)}
 .chip.addchip{border:1px dashed var(--muted);color:var(--muted);background:none}
 .catpick.addcat{border-style:dashed;color:var(--muted)}
 .storecard.addcard{border:1px dashed var(--muted);color:var(--muted);display:flex;align-items:center;justify-content:center;min-height:60px}
+
+/* category reorder mode */
+.reorderlist{margin:4px 0}
+.reorow{display:flex;align-items:center;gap:10px;padding:14px 12px;margin:7px 0;background:var(--card);border:1px solid var(--line);border-radius:var(--r);touch-action:none;cursor:grab;font:600 15px var(--body);color:var(--ink)}
+.reorow.drag{border-color:var(--brand);box-shadow:var(--shadow)}
+.reorow.dim{opacity:.5;cursor:default}
+.reorow .grip{color:var(--muted);font-size:16px}
+.reorow .tag{margin-left:auto}
