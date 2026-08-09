@@ -377,8 +377,8 @@ function App(){
       await run("additems", async ()=>{
         const b=writeBatch(db);
         for(const it of toAdd){
-          b.set(dref("dictionary",slug(it.name)),{name:it.name,stores:it.stores,category:it.category});
-          b.set(newRef("list"),{key:it.name,name:it.name,stores:[...it.stores],category:it.category,checked:false,addedBy:(user.email||"").split("@")[0],ts:serverTimestamp()});
+          b.set(dref("dictionary",slug(it.name)),{name:tc(it.name),stores:it.stores,category:it.category});
+          b.set(newRef("list"),{key:tc(it.name),name:tc(it.name),stores:[...it.stores],category:it.category,checked:false,addedBy:(user.email||"").split("@")[0],ts:serverTimestamp()});
         }
         await b.commit();
       });
@@ -398,10 +398,10 @@ function App(){
         try{ const learned=await routeUnknowns([nm],stores,cats.filter(c=>c!=="Unsorted")); if(learned[nm]&&learned[nm].category) category=learned[nm].category; }catch{}
       }
       const dstores=Array.from(new Set([...((known&&known.stores)||[]),checkedIn]));
-      await setDoc(dref("dictionary",slug(nm)),{name:nm,stores:dstores,category},{merge:true});
+      await setDoc(dref("dictionary",slug(nm)),{name:tc(nm),stores:dstores,category},{merge:true});
       const row=list.find(i=>i.key===nm);
       if(row){ await setDoc(dref("list",row.id),{stores:Array.from(new Set([...(row.stores||[]),checkedIn])),checked:false},{merge:true}); }
-      else { await setDoc(newRef("list"),{key:nm,name:nm,stores:[checkedIn],category,checked:false,addedBy:(user.email||"").split("@")[0],ts:serverTimestamp()}); }
+      else { await setDoc(newRef("list"),{key:tc(nm),name:tc(nm),stores:[checkedIn],category,checked:false,addedBy:(user.email||"").split("@")[0],ts:serverTimestamp()}); }
     });
     flash("Added to "+sname(checkedIn));
   }
@@ -413,8 +413,8 @@ function App(){
       const b=writeBatch(db);
       for(const it of items){
         const st=it.stores||[];
-        b.set(dref("dictionary",slug(it.name)),{name:it.name,stores:st,category:it.category||"Unsorted"});
-        b.set(newRef("list"),{key:it.name,name:it.name,stores:[...st],category:it.category||"Unsorted",checked:false,addedBy:(user.email||"").split("@")[0],ts:serverTimestamp()});
+        b.set(dref("dictionary",slug(it.name)),{name:tc(it.name),stores:st,category:it.category||"Unsorted"});
+        b.set(newRef("list"),{key:tc(it.name),name:tc(it.name),stores:[...st],category:it.category||"Unsorted",checked:false,addedBy:(user.email||"").split("@")[0],ts:serverTimestamp()});
       }
       await b.commit();
     });
@@ -424,7 +424,7 @@ function App(){
   async function toggleReviewStore(key,sid){
     const cur=dict[key]||{stores:[],category:"Unsorted"};
     const st=cur.stores.includes(sid)?cur.stores.filter(x=>x!==sid):[...cur.stores,sid];
-    await setDoc(dref("dictionary",slug(key)),{name:key,stores:st,category:cur.category},{merge:true});
+    await setDoc(dref("dictionary",slug(key)),{name:tc(key),stores:st,category:cur.category},{merge:true});
     const b=writeBatch(db); list.filter(i=>i.key===key).forEach(i=>b.set(dref("list",i.id),{stores:st},{merge:true})); await b.commit();
   }
   const toggle=it=>setDoc(dref("list",it.id),{checked:!it.checked},{merge:true});
@@ -451,7 +451,7 @@ function App(){
     setChipItem(null);
     await run("recat_"+it.id, async ()=>{
       await setDoc(dref("list",it.id),{category:cat},{merge:true});
-      await setDoc(dref("dictionary",slug(it.key||it.name)),{name:it.key||it.name,category:cat},{merge:true});
+      await setDoc(dref("dictionary",slug(it.key||it.name)),{name:tc(it.key||it.name),category:cat},{merge:true});
     });
   }
   const toggleEditStore=sid=>setEditStores(es=>es.includes(sid)?es.filter(x=>x!==sid):[...es,sid]);
@@ -461,7 +461,7 @@ function App(){
     await run("saveitem", async ()=>{
       const b=writeBatch(db);
       b.set(dref("list",itemModal.id),{category:editCat,stores:editStores,tags:editTags},{merge:true});
-      b.set(dref("dictionary",slug(itemModal.key)),{name:itemModal.key,category:editCat,stores:editStores},{merge:true});
+      b.set(dref("dictionary",slug(itemModal.key)),{name:tc(itemModal.key),category:editCat,stores:editStores},{merge:true});
       await b.commit();
     });
     setItemModal(null);
@@ -516,7 +516,7 @@ function App(){
         let ns=i.stores.filter(x=>x!==s.id);
         if(ns.length===0 && assign[i.id]) ns=[assign[i.id]];
         b.set(dref("list",i.id),{stores:ns},{merge:true});
-        b.set(dref("dictionary",slug(i.key)),{name:i.key,stores:ns,category:i.category||"Unsorted"},{merge:true});
+        b.set(dref("dictionary",slug(i.key)),{name:tc(i.key),stores:ns,category:i.category||"Unsorted"},{merge:true});
       });
       Object.entries(dict).forEach(([k,v])=>{ if((v.stores||[]).includes(s.id) && !list.some(i=>i.key===k)) b.set(dref("dictionary",slug(k)),{stores:v.stores.filter(x=>x!==s.id)},{merge:true}); });
       await b.commit();
@@ -541,22 +541,22 @@ function App(){
     await run("delcat_"+c, async ()=>{
       const b=writeBatch(db);
       b.set(cfgDoc(),{categories:[...cats.filter(x=>x!==c&&x!=="Unsorted"),"Unsorted"]},{merge:true});
-      affected.forEach(i=>{ b.set(dref("list",i.id),{category:"Unsorted"},{merge:true}); b.set(dref("dictionary",slug(i.key)),{name:i.key,category:"Unsorted"},{merge:true}); });
+      affected.forEach(i=>{ b.set(dref("list",i.id),{category:"Unsorted"},{merge:true}); b.set(dref("dictionary",slug(i.key)),{name:tc(i.key),category:"Unsorted"},{merge:true}); });
       await b.commit();
     });
     setCatDraft(d=>d.filter(x=>x!==c));
   }
 
   // ---- staples ----
-  const isStaple=name=>staples.some(s=>s.name===name);
+  const isStaple=name=>staples.some(s=>slug(s.name)===slug(name));
   function toggleStaple(name,st,cat){
     const ref=dref("staples",slug(name));
-    return run("star_"+slug(name), ()=> isStaple(name) ? deleteDoc(ref) : setDoc(ref,{name,stores:st||[],category:cat||"Unsorted"}));
+    return run("star_"+slug(name), ()=> isStaple(name) ? deleteDoc(ref) : setDoc(ref,{name:tc(name),stores:st||[],category:cat||"Unsorted"}));
   }
   async function addNewStaple(){
     const nm=normalizeName(newStaple); if(!nm) return;
     const meta=lookup(dict,nm)||{stores:[],category:"Unsorted"};
-    await run("addstaple", ()=>setDoc(dref("staples",slug(nm)),{name:nm,stores:meta.stores||[],category:meta.category||"Unsorted"}));
+    await run("addstaple", ()=>setDoc(dref("staples",slug(nm)),{name:tc(nm),stores:meta.stores||[],category:meta.category||"Unsorted"}));
     setNewStaple("");
   }
   async function addStaplesToList(){
@@ -757,7 +757,7 @@ function App(){
       </div>` : (exclTags.size||exclStores.size)&&listGroups.length===0
         ? html`<div class="empty"><div class="big">Nothing matches</div>No items for these filters \u2014 reset with \u201cAll\u201d.</div>`
         : list.length===0
-        ? html`<div class="empty"><div class="big">List is empty</div>Tap \u201cAdd items\u201d or pull from \u2605 Frequently Bought.</div>`
+        ? html`<div class="empty"><div class="big">List is empty</div>Tap \u201cAdd items\u201d or pull from \u2605 Regularly Bought.</div>`
         : listGroups.map(g=>html`
           <${Panel} title=${g.cat} count=${g.items.length} open=${g.open} onToggle=${()=>toggleCat(g.key)}>
             ${g.items.map(it=>html`
@@ -965,7 +965,7 @@ function App(){
       <div class="menuscrim" onClick=${()=>setMenu(false)}></div>
       <div class="dropdown">
         <div class="ddemail">${user.email}</div>
-        <button class="ddm" onClick=${()=>{setMenu(false);setStapleSel({});setStaplesModal(true);}}>Frequently Bought</button>
+        <button class="ddm" onClick=${()=>{setMenu(false);setStapleSel({});setStaplesModal(true);}}>Regularly Bought</button>
         <button class="ddm" onClick=${()=>{setMenu(false);openHouse();}}>Manage Household</button>
         ${isAdmin?html`<button class="ddm" onClick=${()=>{setMenu(false);setNewName("");setNewCode("");setAdminModal(true);}}>New Household</button>`:null}
         ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openStores();}}>Manage Stores</button>`:null}
@@ -1032,15 +1032,15 @@ function App(){
     ${staplesModal?html`
       <div class="scrim" onClick=${()=>setStaplesModal(false)}></div>
       <div class="sheet tall">
-        <div class="lead">Frequently Bought</div>
+        <div class="lead">Regularly Bought</div>
         <div class="hint">Your regulars. Tick what you need this week and add them all at once. Items already on the list are greyed out.</div>
         <input class="tin" placeholder="Add a staple (e.g. milk)" value=${newStaple} onInput=${e=>setNewStaple(e.target.value)} onKeyDown=${e=>{if(e.key==="Enter")addNewStaple();}} />
         ${staples.length===0?html`<div class="hint">No staples yet \u2014 star items on the List or in Purchase History to keep them here.</div>`:null}
         ${staples.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(s=>{
-          const onList=list.some(i=>i.key===s.name);
+          const onList=list.some(i=>slug(i.key||i.name)===slug(s.name));
           return html`<div class=${"strow"+(onList?" off":"")} onClick=${()=>{ if(!onList) setStapleSel(v=>({...v,[s.id]:!v[s.id]})); }}>
             <div class=${"box sm"+((stapleSel[s.id]&&!onList)?" on":"")}>${(stapleSel[s.id]&&!onList)?check:null}</div>
-            <span class="sname2">${s.name}</span>
+            <span class="sname2">${tc(s.name)}</span>
             <span class="lstores">${(s.stores||[]).map(x=>lsq(scolor(x),sname(x)))}</span>
             ${onList?html`<span class="tag">on list</span>`:null}
             <button class="rowx" onClick=${e=>{e.stopPropagation();toggleStaple(s.name,s.stores,s.category);}}>${isBusy("star_"+s.id)?html`<${Spin} g=${true}/>`:"\u00d7"}</button>
