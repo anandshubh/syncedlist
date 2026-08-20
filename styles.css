@@ -289,3 +289,30 @@ textarea:focus,.tin:focus{outline:none;border-color:var(--brand)}
 .mselsearch:focus{outline:none;border-color:var(--brand)}
 .listcount{font-size:13px;font-weight:600;color:var(--ink);margin:0 2px 10px}
 .lcmuted{color:var(--muted);font-weight:500}
+
+/* one-tap category chip (List) + picker */
+.lmain{cursor:pointer}
+.catchip{display:inline-block;margin-top:3px;padding:1px 9px;font:600 11px/1.7 var(--body);color:var(--muted);background:var(--paper);border:1px solid var(--line);border-radius:999px;cursor:pointer}
+.catchip:hover{color:var(--ink);border-color:var(--muted)}
+.catpick{padding:11px 8px;border:1px solid var(--line);border-radius:var(--r);background:var(--card);font:600 14px var(--body);color:var(--ink);cursor:pointer}
+.catpick.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+/* list-tools row + dimmed empty store tiles */
+.listtools{display:flex;align-items:center;margin:8px 2px 10px}
+.listtools .listcount{flex:1;text-align:center;margin:0}
+.listtools .lt-side{flex:0 0 92px;width:92px}
+.listtools .lt-btn{text-align:right;background:none;border:0;color:var(--muted);font:600 13px var(--body);cursor:pointer}
+.listtools .lt-btn:hover{color:var(--ink)}
+.storecard.empty{opacity:.5}
+
+.chip.addchip{border:1px dashed var(--muted);color:var(--muted);background:none}
+.catpick.addcat{border-style:dashed;color:var(--muted)}
+.storecard.addcard{border:1px dashed var(--muted);color:var(--muted);display:flex;align-items:center;justify-content:center;min-height:60px}
+
+/* category reorder mode */
+.reorderlist{margin:4px 0}
+.reorow{display:flex;align-items:center;gap:10px;padding:14px 12px;margin:7px 0;background:var(--card);border:1px solid var(--line);border-radius:var(--r);touch-action:none;cursor:grab;font:600 15px var(--body);color:var(--ink)}
+.reorow.drag{border-color:var(--brand);box-shadow:var(--shadow)}
+.reorow.dim{opacity:.5;cursor:default}
+.reorow .grip{color:var(--muted);font-size:16px}
+.reorow .tag{margin-left:auto}
