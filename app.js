@@ -1,5 +1,5 @@
 import { h, render } from "https://esm.sh/preact@10.19.3";
-import { useState, useEffect, useMemo } from "https://esm.sh/preact@10.19.3/hooks";
+import { useState, useEffect, useMemo, useRef } from "https://esm.sh/preact@10.19.3/hooks";
 import htm from "https://esm.sh/htm@3.1.1";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
@@ -28,6 +28,15 @@ const storage = getStorage(appFb);
 
 const CATS = ["Produce","Bakery","Dairy","Meat","Frozen","Spices","Staples","Household","Unsorted"];
 const STORE_SWATCHES = ["#f2a7a1","#a8c8ec","#f2c79b","#a9d8b8","#c9b8e8","#9ad9d2","#f0b6d3","#e0cfa0"];
+
+// ---- version indicator ----
+// APP_VERSION is baked into this bundle at deploy time; CACHE_PREFIX must match the
+// literal prefix of sw.js's CACHE constant. Bump APP_VERSION and sw.js's CACHE together
+// on every deploy, in lockstep — that equality is the entire feature. If they drift,
+// the stale-cache check below silently never fires.
+const APP_VERSION = "v13";
+const CACHE_PREFIX = "syncedlist-";
+const EXPECTED_CACHE = CACHE_PREFIX + APP_VERSION;
 
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,120) || "x";
 const tc = s => (s||"").replace(/\b\w/g, c=>c.toUpperCase());  // Title-Case for display
@@ -85,6 +94,87 @@ function Panel({title, count, color, open, onToggle, children}){
 function Loader({label}){
   return html`<div class="loader"><span class="spin g big"></span><span>${label||"Loading\u2026"}</span></div>`;
 }
+
+// Slide-to-checkout: the thumb must be dragged ~90% of the way across the track before
+// it commits. A tap, a brush, or a double-tap never accumulates \u2014 every gesture that
+// doesn't cross the threshold springs back to zero. Uses pointer capture on the thumb
+// itself, so once a finger is down, drag tracking continues even if it slides off the
+// track (important for one-handed use) \u2014 no window-level listeners needed.
+const SLIDE_THRESHOLD = 0.9; // raise this (e.g. .93) if it triggers too easily on small screens
+
+function SlideToCheckout({label, disabled, onCommit}){
+  const trackRef = useRef(null);
+  const thumbRef = useRef(null);
+  const labelRef = useRef(null);
+  const dragRef = useRef(null); // {startX, maxOffset, offset}
+  const [committing, setCommitting] = useState(false);
+
+  function paint(offset, animate, max){
+    const th = thumbRef.current, lb = labelRef.current;
+    if(th){
+      th.style.transition = animate ? "transform .25s cubic-bezier(.22,.85,.32,1)" : "none";
+      th.style.transform = `translateX(${offset}px)`;
+    }
+    if(lb){
+      const progress = max>0 ? Math.min(1, offset/max) : 0;
+      lb.style.transition = animate ? "opacity .2s" : "none";
+      lb.style.opacity = String(Math.max(0, 1 - progress*1.3));
+    }
+  }
+  function onDown(e){
+    if(disabled || committing) return;
+    const track = trackRef.current, thumb = thumbRef.current;
+    if(!track || !thumb) return;
+    const trackW = track.getBoundingClientRect().width;
+    const thumbW = thumb.getBoundingClientRect().width;
+    dragRef.current = { startX: e.clientX, maxOffset: Math.max(1, trackW - thumbW), offset: 0 };
+    try{ thumb.setPointerCapture(e.pointerId); }catch{}
+  }
+  function onMove(e){
+    const ds = dragRef.current;
+    if(!ds) return;
+    const dx = e.clientX - ds.startX;
+    ds.offset = Math.min(ds.maxOffset, Math.max(0, dx));
+    paint(ds.offset, false, ds.maxOffset);
+  }
+  function onUp(e){
+    const ds = dragRef.current;
+    dragRef.current = null;
+    if(!ds) return;
+    try{ thumbRef.current && thumbRef.current.releasePointerCapture(e.pointerId); }catch{}
+    const progress = ds.maxOffset>0 ? ds.offset/ds.maxOffset : 0;
+    if(progress >= SLIDE_THRESHOLD){
+      paint(ds.maxOffset, true, ds.maxOffset);
+      setCommitting(true);
+      Promise.resolve(onCommit()).finally(()=>{
+        setCommitting(false);
+        paint(0, false, ds.maxOffset);
+      });
+    } else {
+      paint(0, true, ds.maxOffset);
+    }
+  }
+
+  return html`
+    <div class=${"slidecheck"+((disabled||committing)?" dis":"")} ref=${trackRef}>
+      <span class="slidecheck-label" ref=${labelRef}>${committing?html`<${Spin}/>Saving\u2026`:label}</span>
+      <div class="slidecheck-thumb"
+        ref=${thumbRef}
+        onPointerDown=${onDown}
+        onPointerMove=${onMove}
+        onPointerUp=${onUp}
+        onPointerCancel=${onUp}>
+        <span class="slidecheck-arrow">\u203a</span>
+      </div>
+    </div>`;
+}
+
+// Synchronous re-entrancy guard for checkOut(), outside React state on purpose:
+// setBusy() is async (a state update), so two synchronous invocations in the same tick
+// (e.g. the slide committing and the top-strip tap firing together) could both pass an
+// isBusy() check before either state update lands. This plain module-level flag can't
+// race like that \u2014 the second call sees it true immediately and bails.
+let checkoutLock = false;
 
 function App(){
   const [user,setUser]=useState(undefined);
@@ -160,6 +250,7 @@ function App(){
   const [stapleSel,setStapleSel]=useState({});
   const [newStaple,setNewStaple]=useState("");
   const [menu,setMenu]=useState(false);
+  const [cacheState,setCacheState]=useState("checking"); // "checking" | "ok" | "stale" | "unknown"
 
   const flash=m=>{setToast(m);setTimeout(()=>setToast(""),1800);};
   const scolor=id=>(stores.find(s=>s.id===id)||{}).color||"#ccc";
@@ -172,7 +263,7 @@ function App(){
   const toggleCat=key=>setCollapsed(c=>({...c,[key]:!c[key]}));
   useEffect(()=>{
     const order=["list","shop","history"];
-    const noswipe='input,textarea,select,.sheet,.scrim,.mselscrim,.msellist,.msel,.picker,.filters,.also,.lstores,.catgrid,.storecard,.reorow';
+    const noswipe='input,textarea,select,.sheet,.scrim,.mselscrim,.msellist,.msel,.picker,.filters,.also,.lstores,.catgrid,.storecard,.reorow,.slidecheck';
     let x0=0,y0=0,t0=0,skip=false;
     const onStart=e=>{ const t=e.touches&&e.touches[0]; if(!t){skip=true;return;}
       x0=t.clientX; y0=t.clientY; t0=Date.now();
@@ -216,6 +307,25 @@ function App(){
   useEffect(()=>{const on=()=>setOnline(true),off=()=>setOnline(false);
     addEventListener("online",on);addEventListener("offline",off);
     return()=>{removeEventListener("online",on);removeEventListener("offline",off);};},[]);
+  // version indicator: compare the version baked into this running bundle against
+  // whichever syncedlist-* cache the active service worker last installed. Mismatch
+  // means the code and the cache have drifted — surface it instead of leaving you to guess.
+  useEffect(()=>{
+    let cancelled=false;
+    async function checkCache(){
+      if(!("caches" in window)){ if(!cancelled) setCacheState("unknown"); return; }
+      try{
+        const keys=await caches.keys();
+        const synced=keys.filter(k=>k.startsWith(CACHE_PREFIX));
+        if(cancelled) return;
+        if(!synced.length){ setCacheState("unknown"); return; } // no SW cache yet (first load)
+        setCacheState(synced.includes(EXPECTED_CACHE)?"ok":"stale");
+      }catch{ if(!cancelled) setCacheState("unknown"); }
+    }
+    checkCache();
+    const iv=setInterval(checkCache,60000);
+    return()=>{cancelled=true;clearInterval(iv);};
+  },[]);
 
   // household data — resubscribes whenever the resolved household changes.
   // stores AND categories are head-managed, both live in config/app.
@@ -470,20 +580,27 @@ function App(){
   const removeRow=it=>run("rm_"+it.id, ()=>deleteDoc(dref("list",it.id)));
 
   async function checkOut(){
-    const store=checkedIn;
-    const done=list.filter(i=>i.stores.includes(store)&&i.checked);
-    if(done.length){
-      await run("checkout", async ()=>{
-        const b=writeBatch(db);
-        for(const i of done){
-          b.set(newRef("purchased"),{name:i.name,store,date:todayISO(),status:"purchased",ts:serverTimestamp()});
-          b.delete(dref("list",i.id));
-        }
-        await b.commit();
-      });
-      flash(done.length+" bought at "+sname(store));
+    // See checkoutLock above: only the first commit to reach this line runs.
+    if(checkoutLock) return;
+    checkoutLock=true;
+    try{
+      const store=checkedIn;
+      const done=list.filter(i=>i.stores.includes(store)&&i.checked);
+      if(done.length){
+        await run("checkout", async ()=>{
+          const b=writeBatch(db);
+          for(const i of done){
+            b.set(newRef("purchased"),{name:i.name,store,date:todayISO(),status:"purchased",ts:serverTimestamp()});
+            b.delete(dref("list",i.id));
+          }
+          await b.commit();
+        });
+        flash(done.length+" bought at "+sname(store));
+      }
+      setCheckedIn(null);
+    } finally {
+      checkoutLock=false;
     }
-    setCheckedIn(null);
   }
 
   // ---- stores: add / rename / recolor / delete ----
@@ -661,6 +778,7 @@ function App(){
   const pClamped=Math.min(pPage,pTotal-1);
   const pagedPurch=filteredPurch.slice(pClamped*PER,pClamped*PER+PER);
 
+  const cacheStale = cacheState==="stale";
   const check=html`<svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
   if(user===undefined) return html`<div class="gate"><div class="brand">SyncedList<span class="dot">.</span></div><${Loader} label="Starting\u2026"/></div>`;
@@ -972,6 +1090,7 @@ function App(){
         ${role==="head"?html`<button class="ddm" onClick=${()=>{setMenu(false);openCats();}}>Manage Categories</button>`:null}
         <div class="ddsep"></div>
         <button class="ddm ddout" onClick=${()=>signOut(auth)}>Sign Out</button>
+        <div class=${"ddver"+(cacheStale?" stale":"")}>Version ${APP_VERSION}${cacheStale?html` · <button class="ddver-reload" onClick=${()=>location.reload()}>reload to update</button>`:null}</div>
       </div>`:null}
 
     <!-- categories -->
@@ -1088,8 +1207,14 @@ function App(){
       <div class="imgview" onClick=${()=>setViewImg(null)}><img src=${viewImg} alt="attachment" /></div>`:null}
 
     ${(page==="shop" && checkedIn)?html`
-      <div class="submitbar"><div class="inner"><button class="primary" style="width:100%" disabled=${isBusy("checkout")} onClick=${checkOut}>${isBusy("checkout")?html`<${Spin}/>Saving\u2026`:(shopChecked>0?"Check out \u00b7 "+shopChecked+" bought":"Check out")}</button></div></div>`:null}
+      <div class="submitbar"><div class="inner">
+        <${SlideToCheckout}
+          label=${shopChecked>0?"Slide to check out \u00b7 "+shopChecked+" bought":"Slide to check out"}
+          disabled=${isBusy("checkout")}
+          onCommit=${checkOut} />
+      </div></div>`:null}
     ${toast?html`<div class="toast">${toast}</div>`:null}
+    <div class=${"verstamp"+(cacheStale?" stale":"")}>${APP_VERSION}</div>
   `;
 }
 render(html`<${App}/>`, document.getElementById("app"));
